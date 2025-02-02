@@ -1,7 +1,3 @@
-Alright, let’s break this down in Markdown!
-
----
-
 # Explanation of Terraform Configuration
 
 This Terraform configuration sets up an AWS environment with an EC2 instance running Jenkins, S3 bucket configurations, security groups, and IAM roles.
