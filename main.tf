@@ -1,17 +1,17 @@
 provider "aws" {
-  region = "us-east-1"
+  region = var.default_aws_region
 }
 
 #Create security group
 resource "aws_security_group" "luit-sg" {
   name        = "luit-sg"
   description = "Allow port 22 from my IP and port 8080 from anywhere"
-  vpc_id      = "<your-vpc-id>"
+  vpc_id      = var.vpc_id
 }
 #Create security group rule allowing port 22 from my IP
 resource "aws_vpc_security_group_ingress_rule" "allow_22_myip" {
   security_group_id = aws_security_group.luit-sg.id
-  cidr_ipv4         = "<your-local-machine-ipv4-address>"
+  cidr_ipv4         = var.my_pc_ip
   from_port         = 22
   ip_protocol       = "tcp"
   to_port           = 22
@@ -20,7 +20,7 @@ resource "aws_vpc_security_group_ingress_rule" "allow_22_myip" {
 #Create security group rule allowing port 8080 from anywhere
 resource "aws_vpc_security_group_ingress_rule" "allow_8080_anywhere" {
   security_group_id = aws_security_group.luit-sg.id
-  cidr_ipv4         = "0.0.0.0/0"
+  cidr_ipv4         = var.access_from_anywhere_cidr
   from_port         = 8080
   ip_protocol       = "tcp"
   to_port           = 8080
@@ -29,16 +29,17 @@ resource "aws_vpc_security_group_ingress_rule" "allow_8080_anywhere" {
 #Allow all traffic egress rule
 resource "aws_vpc_security_group_egress_rule" "allow_all_traffic-egress_ipv4" {
   security_group_id = aws_security_group.luit-sg.id
-  cidr_ipv4         = "0.0.0.0/0"
+  cidr_ipv4         = var.access_from_anywhere_cidr
   ip_protocol       = "-1" # semantically equivalent to all ports
 }
 
-#Create ec2 instance with bootstrap script to install  java and then jenkins
+#Create ec2 instance with bootstrap script
 resource "aws_instance" "web" {
-  ami             = "ami-04b4f1a9cf54c11d0" #ubuntu us-east-1
-  instance_type   = "t2.micro"
-  security_groups = ["luit-sg"]
-  key_name        = "<your-key-name>"
+  ami             = var.ubuntu-us-east-1-ami
+  instance_type   = var.instance_size
+  security_groups = [var.security_group_name]
+  key_name        = var.keypair_name
+  iam_instance_profile = aws_iam_instance_profile.ec2_instance_profile.name
   user_data       = <<-EOF
                         #!/bin/bash
                         sudo apt update -y
@@ -53,7 +54,7 @@ resource "aws_instance" "web" {
 }
 
 resource "aws_s3_bucket" "dtmluitbucket" {
-  bucket        = "dtmluitbucket"
+  bucket        = var.bucket_name
   force_destroy = true
 
 }
@@ -91,3 +92,51 @@ resource "aws_s3_bucket_versioning" "versioning_example" {
     status = "Disabled"
   }
 }
+
+#Create IAM policy for ec2 instance with s3 bucket read/write access
+resource "aws_iam_role_policy" "my_policy" {
+  name = "s3-full-access-for-ec2"
+  role = aws_iam_role.ec2_role.id
+
+  # Terraform's "jsonencode" function converts a
+  # Terraform expression result to valid JSON syntax.
+  policy = jsonencode({
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "s3:*",
+                "s3-object-lambda:*"
+            ],
+            "Resource": "*"
+        }
+    ]
+})
+}
+
+#Create IAM role for ec2 instance with s3 bucket read/write access
+
+resource "aws_iam_role" "ec2_role" {
+  name = "jenkins-ec2-role-with-s3-access"
+
+  # Terraform's "jsonencode" function converts a
+  # Terraform expression result to valid JSON syntax.
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Sid    = ""
+        Principal = {
+          Service = "ec2.amazonaws.com"
+        }
+      },
+    ]
+  })
+}
+
+resource "aws_iam_instance_profile" "ec2_instance_profile" {
+  name = "ec2_instance_profile"
+  role = aws_iam_role.ec2_role.name
